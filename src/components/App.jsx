@@ -17,6 +17,7 @@ import Tone from 'tone'
 // const fs = remote.require('fs')
 
 import fs from 'fs'
+import { TFHUB_SEARCH_PARAM } from '@tensorflow/tfjs-converter/dist/src/executor/graph_model';
 
 class App extends Component {
 
@@ -82,21 +83,9 @@ class App extends Component {
 
     const qns = mm.sequences.quantizeNoteSequence(TWINKLE_TWINKLE, 4);
 
-    this.state = { noteSequence: qns }
+    this.state = { noteSequence: qns, onsetAndFramesModel: this.initModel() }
 
-    const model = new mm.Coconet('https://storage.googleapis.com/magentadata/js/checkpoints/coconet/bach');
-    model.initialize()
-    .then(() => {
-        console.time('a')
-        model.infill(qns, {
-          temperature: 0.99
-        })
-          .then(output => { 
-            this.setState({ noteSequence: output }) 
-            console.log("State initialized!")
-            console.timeEnd('a')
-          })
-      })
+    console.log(this.state)
   }
 
 
@@ -143,6 +132,64 @@ class App extends Component {
     // }
   }
 
+  record() {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+          const mediaRecorder = new MediaRecorder(stream);
+          mediaRecorder.start();
+
+          const audioChunks = [];
+
+          mediaRecorder.addEventListener("dataavailable", event => {
+            audioChunks.push(event.data);
+          });
+
+          mediaRecorder.addEventListener("stop", () => {
+            const audioBlob = new Blob(audioChunks);
+
+            console.log(this.state)
+
+            this.state.onsetAndFramesModel.transcribeFromAudioFile(audioBlob).then(ns => {
+              const qns = mm.sequences.quantizeNoteSequence(ns, 4)
+                this.setState({ noteSequence: qns})
+                console.log("Recorded")
+                const model = new mm.Coconet('https://storage.googleapis.com/magentadata/js/checkpoints/coconet/bach');
+                model.initialize()
+                .then(() => {
+                    console.time('a')
+                    model.infill(qns, {
+                      temperature: 0.49
+                    })
+                      .then(output => { 
+                        this.setState({ noteSequence: output }) 
+                        console.log("State initialized!")
+                        console.timeEnd('a')
+                      })
+                  })
+            })
+
+            // const audioUrl = URL.createObjectURL(audioBlob);
+            // const audio = new Audio(audioUrl);
+            // audio.play();
+          });
+
+          setTimeout(() => {
+            mediaRecorder.stop();
+            console.log("stopped recording")
+          }, 8000);
+      });
+  }
+
+  initModel() {
+    const model = new mm.OnsetsAndFrames('https://storage.googleapis.com/magentadata/js/checkpoints/transcription/onsets_frames_uni');
+    
+    model.initialize().then(() => {
+      console.log('onsets and frames model loaded')
+    });
+
+    return model;
+  }
+
 //   download (url, dest, cb) {
 //     var file = fs.createWriteStream(dest);
 //     var request = http.get(url, function(response) {
@@ -161,6 +208,7 @@ class App extends Component {
       <div>
         <button onClick={() => this.play()}>Play</button>
         <button onClick={() => this.save()}>Save</button>
+        <button onClick={() => this.record()}>Record</button>
       </div>
     )
   }
